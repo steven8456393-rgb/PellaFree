@@ -505,7 +505,7 @@ async function login(email, password) {
   const CLERK_API_VERSION = '2025-11-10';
   const CLERK_JS_VERSION = '5.125.3';
 
-  const signInResponse = await fetch(`https://clerk.pella.app/v1/client/sign_ins?__clerk_api_version=${CLERK_API_VERSION}&_clerk_js_version=${CLERK_JS_VERSION}`, {
+  let signInResponse = await fetch(`https://clerk.pella.app/v1/client/sign_ins?__clerk_api_version=${CLERK_API_VERSION}&_clerk_js_version=${CLERK_JS_VERSION}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -515,6 +515,25 @@ async function login(email, password) {
     },
     body: new URLSearchParams({ locale: 'zh-CN', identifier: email, password, strategy: 'password' }).toString()
   });
+
+  // 429 限流时退避重试（Clerk 对同一 IP 短时间多次登录会限流）
+  let retryCount = 0;
+  while (signInResponse.status === 429 && retryCount < 3) {
+    retryCount++;
+    const waitMs = retryCount * 5000;
+    console.log(`登录被限流 (429)，${waitMs/1000} 秒后重试 (${retryCount}/3)...`);
+    await delay(waitMs);
+    signInResponse = await fetch(`https://clerk.pella.app/v1/client/sign_ins?__clerk_api_version=${CLERK_API_VERSION}&_clerk_js_version=${CLERK_JS_VERSION}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Origin': 'https://www.pella.app',
+        'Referer': 'https://www.pella.app/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      body: new URLSearchParams({ locale: 'zh-CN', identifier: email, password, strategy: 'password' }).toString()
+    });
+  }
 
   if (!signInResponse.ok) {
     const errorText = await signInResponse.text().catch(() => '');
